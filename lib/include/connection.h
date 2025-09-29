@@ -21,6 +21,9 @@ typedef struct connection_t
     socklen_t addr_len;
     int32_t fd;
     client_t clients[MAX_NEIGHBOURS];
+
+    int32_t udp_fd;
+    struct sockaddr_in udp_addr;
 } connection_t;
 
 err_t create_connection(connection_t connection[static 1], int32_t port);

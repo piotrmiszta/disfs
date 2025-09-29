@@ -1,7 +1,9 @@
 #include "connection.h"
 #include "err_codes.h"
 #include "logger.h"
+#include <arpa/inet.h>
 #include <fcntl.h>
+#include <netinet/in.h>
 #include <pthread.h>
 #include <sys/epoll.h>
 #include <sys/fcntl.h>
@@ -21,6 +23,39 @@ static err_t connection_handle_events(int32_t epoll, struct epoll_event* events,
 
 err_t create_connection(connection_t connection[static 1], int32_t port)
 {
+    /* create udp socket */
+    connection->udp_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (connection->udp_fd <= 0)
+    {
+        LOG_ERROR("Cannot create socket for udp connection: errno=%d : %s\n",
+                  errno, strerror(errno));
+        return DISFS_ERR_SOCK;
+    }
+
+    int32_t udp_opt = -1;
+    int32_t ret = setsockopt(connection->udp_fd, SOL_SOCKET, SO_REUSEADDR,
+                             &udp_opt, sizeof(udp_opt));
+
+    if (ret < 0)
+    {
+        LOG_ERROR(
+            "Cannot set options to socket: socket = %d, errno = %d : %s!\n",
+            connection->udp_fd, errno, strerror(errno));
+        return DISFS_ERR_SOCK;
+    }
+
+    connection->udp_addr.sin_family = AF_INET;
+    connection->udp_addr.sin_addr.s_addr = INADDR_ANY;
+    connection->udp_addr.sin_port = htons(8080);
+
+    if (bind(connection->udp_fd, (struct sockaddr*)&connection->udp_addr,
+             sizeof(connection->udp_addr)) < 0)
+    {
+        LOG_ERROR("Cannot bind socket to port: port %d errno: %d : %s!\n", port,
+                  errno, strerror(errno));
+        return DISFS_ERR_SOCK;
+    }
+
     connection->fd = socket(AF_INET, SOCK_STREAM, 0);
     if (connection->fd <= 0)
     {
@@ -30,7 +65,7 @@ err_t create_connection(connection_t connection[static 1], int32_t port)
     }
 
     int32_t opt = -1;
-    int32_t ret =
+    ret =
         setsockopt(connection->fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
     if (ret < 0)
@@ -92,6 +127,7 @@ static void* connection_thread(void* arg)
     connection_t* conn = arg;
     connection_set_noblock(conn->fd);
     connection_add_event(epoll, conn->fd, EPOLLIN);
+    connection_add_event(epoll, conn->udp_fd, EPOLLIN);
     while (1)
     {
         int32_t no_events = epoll_wait(epoll, events, EPOLL_MAX_FD * 10, 1000);
@@ -189,6 +225,24 @@ static err_t connection_handle_events(int32_t epoll, struct epoll_event* events,
         if (fd == connection->fd)
         {
             connection_accept_client(epoll, connection);
+        }
+        else if (fd == connection->udp_fd)
+        {
+            /*
+               Handle broadcasted UDP packet to get new client, after receiving
+               this packet, we should initiate connection with following client.
+
+             */
+            char buffer[1024] = {};
+            struct sockaddr_in src_addr;
+            socklen_t addrlen = sizeof(src_addr);
+
+            int n = recvfrom(fd, buffer, sizeof(buffer) - 1, 0,
+                             (struct sockaddr*)&src_addr, &addrlen);
+            char ip[INET_ADDRSTRLEN] = {};
+            inet_ntop(AF_INET, &(src_addr.sin_addr), ip, sizeof(ip));
+            LOG_TRACE("Received udp packet: fd=%d, ip=%s, port=%d, buffor=%s\n",
+                      fd, ip, ntohs(src_addr.sin_port), buffer);
         }
         else
         {
