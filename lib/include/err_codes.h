@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2025 Piotr Miszta
+ * SPDX-License-Identifier: MIT
+ */
+
 #ifndef DISFS_ERR_CODES_H_
 #define DISFS_ERR_CODES_H_
 

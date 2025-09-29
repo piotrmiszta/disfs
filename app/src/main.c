@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2025 Piotr Miszta
+ * SPDX-License-Identifier: MIT
+ */
+
 #include "connection.h"
 #include "logger.h"
 #include <assert.h>

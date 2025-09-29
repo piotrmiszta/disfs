@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2025 Piotr Miszta
+ * SPDX-License-Identifier: MIT
+ */
+
 #ifndef DISFS_CONNECTION_H_
 #define DISFS_CONNECTION_H_
 
