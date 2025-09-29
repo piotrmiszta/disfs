@@ -1,6 +1,6 @@
 set(LIB_SOURCE_PATH ${CMAKE_SOURCE_DIR}/lib/src)
 
-add_library(disfslib ${LIB_SOURCE_PATH}/lib.c)
+add_library(disfslib ${LIB_SOURCE_PATH}/connection.c)
 
 target_include_directories(disfslib PUBLIC include/)
 

@@ -1,8 +1,12 @@
-#include "lib.h"
+#include "connection.h"
+#include "logger.h"
 #include <assert.h>
 #include <stdio.h>
 
 int main(int argc, char* argv[])
 {
-    printf("Hello World! %d\n", test(5));
+    LOG_DEBUG("Hello World from %s!\n", argv[0]);
+    connection_t conn;
+    create_connection(&conn, 8080);
+    return 0;
 }
