@@ -6,18 +6,22 @@
 #include "connection.h"
 #include "err_codes.h"
 #include "logger.h"
+#include "udp_discovery.h"
 #include <arpa/inet.h>
 #include <fcntl.h>
+#include <ifaddrs.h>
+#include <net/if.h>
 #include <netinet/in.h>
 #include <pthread.h>
+#include <stdlib.h>
 #include <sys/epoll.h>
 #include <sys/fcntl.h>
 #include <sys/socket.h>
 #include <unistd.h>
-
 #define EPOLL_MAX_FD 100
 
 static void* connection_thread(void* arg);
+static void* connection_udp_thread(void* arg);
 static err_t connection_set_noblock(int32_t fd);
 static err_t connection_add_event(int32_t epoll, int32_t fd, uint32_t state);
 static err_t connection_accept_client(int32_t epoll,
@@ -25,9 +29,39 @@ static err_t connection_accept_client(int32_t epoll,
 static err_t connection_handle_events(int32_t epoll, struct epoll_event* events,
                                       int32_t events_count,
                                       connection_t connection[static 1]);
+static err_t connection_to_new_server(UDP_packet packet[static 1],
+                                      struct sockaddr_in* addr);
 
-err_t create_connection(connection_t connection[static 1], int32_t port)
+static void connection_get_local_ip(connection_t connection[static 1]);
+
+static void connection_get_local_ip(connection_t connection[static 1])
 {
+    struct ifaddrs *ifaddr, *ifa;
+    getifaddrs(&ifaddr);
+    for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next)
+    {
+        if (ifa->ifa_addr == NULL)
+            continue;
+        if (ifa->ifa_addr->sa_family == AF_INET &&
+            strcmp(ifa->ifa_name, "lo") != 0)
+        {
+            struct sockaddr_in* sa = (struct sockaddr_in*)ifa->ifa_addr;
+            inet_ntop(AF_INET, &(sa->sin_addr), connection->local_ip,
+                      INET_ADDRSTRLEN);
+            break;
+        }
+    }
+    freeifaddrs(ifaddr);
+    LOG_DEBUG("Local Ip address = %s\n", connection->local_ip);
+}
+
+err_t _internal_create_connection(connection_t connection[static 1],
+                                  connection_params_opt params)
+{
+    connection_get_local_ip(connection);
+    int32_t tcp_port = params.port_tcp ? params.port_tcp : 8080;
+    int32_t udp_port = params.port_udp ? params.port_udp : 8080;
+
     /* create udp socket */
     connection->udp_fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (connection->udp_fd <= 0)
@@ -51,13 +85,13 @@ err_t create_connection(connection_t connection[static 1], int32_t port)
 
     connection->udp_addr.sin_family = AF_INET;
     connection->udp_addr.sin_addr.s_addr = INADDR_ANY;
-    connection->udp_addr.sin_port = htons(8080);
+    connection->udp_addr.sin_port = htons(8081);
 
     if (bind(connection->udp_fd, (struct sockaddr*)&connection->udp_addr,
              sizeof(connection->udp_addr)) < 0)
     {
-        LOG_ERROR("Cannot bind socket to port: port %d errno: %d : %s!\n", port,
-                  errno, strerror(errno));
+        LOG_ERROR("Cannot bind socket to port: port %d errno: %d : %s!\n",
+                  udp_port, errno, strerror(errno));
         return DISFS_ERR_SOCK;
     }
 
@@ -82,15 +116,15 @@ err_t create_connection(connection_t connection[static 1], int32_t port)
 
     connection->addr.sin_addr.s_addr = INADDR_ANY;
     connection->addr.sin_family = AF_INET;
-    connection->addr.sin_port = htons(port);
+    connection->addr.sin_port = htons(tcp_port);
     connection->addr_len = sizeof(connection->addr);
 
     ret = bind(connection->fd, (struct sockaddr*)&connection->addr,
                connection->addr_len);
     if (ret < 0)
     {
-        LOG_ERROR("Cannot bind socket to port: port %d errno: %d : %s!\n", port,
-                  errno, strerror(errno));
+        LOG_ERROR("Cannot bind socket to port: port %d errno: %d : %s!\n",
+                  tcp_port, errno, strerror(errno));
         return DISFS_ERR_SOCK;
     }
 
@@ -104,23 +138,10 @@ err_t create_connection(connection_t connection[static 1], int32_t port)
 
     LOG_DEBUG("Successfully created connection socket: %d\n", connection->fd);
 
-    /*
-       TODO: this server should be able to handle multiple connections
-       to do this implement epoll from linux.
-       This architecture will be peer to peer connection, after establishing
-       this connection, be sure that we don't have another open conection.
-       For simplicity at start let's implement each to each connection
-       mechanism, but the best option is to handle connection to only 3/4
-       neighbours, with lowest ping/ max throuput and reoute messages to all
-       other peers. This connection should be established after multicast
-       message received
-    */
-
     pthread_t th;
     pthread_create(&th, NULL, connection_thread, connection);
-    while (1)
-    {
-    }
+    pthread_t th_udp;
+    pthread_create(&th_udp, NULL, connection_udp_thread, connection);
     return 0;
 }
 
@@ -248,6 +269,28 @@ static err_t connection_handle_events(int32_t epoll, struct epoll_event* events,
             inet_ntop(AF_INET, &(src_addr.sin_addr), ip, sizeof(ip));
             LOG_TRACE("Received udp packet: fd=%d, ip=%s, port=%d, buffor=%s\n",
                       fd, ip, ntohs(src_addr.sin_port), buffer);
+
+            /* resend udp packet, to inform where start connection */
+            UDP_packet packet = {};
+            udp_discovery_packet_deserialize(&packet, buffer, n);
+            // after that try to connect to this server
+            if (packet.magic_number != UDP_DISCOVERY_PACKET_MAGIC_NUMBER ||
+                packet.protocol_version != UDP_DISCOVERY_PROTOCOL_VERSION)
+            {
+                LOG_ERROR("Udp packet with incorrect information!\n");
+                break;
+            }
+            if (strcmp(ip, "127.0.0.1") == 0)
+            {
+                LOG_TRACE("Internal sended message!, ignoring\n");
+                continue;
+            }
+            if (strcmp(ip, connection->local_ip) == 0)
+            {
+                LOG_TRACE("Internal sended message!, ignoring\n");
+                continue;
+            }
+            connection_to_new_server(&packet, &src_addr);
         }
         else
         {
@@ -271,4 +314,67 @@ static err_t connection_handle_events(int32_t epoll, struct epoll_event* events,
         }
     }
     return DISFS_SUCCESS;
+}
+
+static err_t connection_to_new_server(UDP_packet packet[static 1],
+                                      struct sockaddr_in* addr)
+{
+
+    client_t* client = malloc(sizeof(client));
+    client->fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (client->fd < 0)
+    {
+        LOG_ERROR("Cannot create socket for connection\n");
+        return DISFS_ERR_SOCK;
+    }
+    client->addr.sin_family = AF_INET;
+    client->addr.sin_port = htons(packet->tcp_port);
+    client->addr.sin_addr = addr->sin_addr;
+
+    if (connect(client->fd, (struct sockaddr*)&client->addr,
+                sizeof(client->addr)) < 0)
+    {
+        LOG_ERROR("Cannot connect to server!\n");
+        return DISFS_ERR_SOCK;
+    }
+    LOG_DEBUG("Connected to client!\n");
+    return DISFS_SUCCESS;
+}
+
+static void* connection_udp_thread(void* arg)
+{
+    int32_t fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd <= 0)
+    {
+        LOG_ERROR("Cannot create socket for udp connection: errno=%d : %s\n",
+                  errno, strerror(errno));
+        return NULL;
+    }
+
+    int32_t udp_opt = 1;
+    int32_t ret = setsockopt(fd, SOL_SOCKET, SO_BROADCAST | SO_REUSEADDR,
+                             &udp_opt, sizeof(udp_opt));
+
+    if (ret < 0)
+    {
+        LOG_ERROR(
+            "Cannot set options to socket: socket = %d, errno = %d : %s!\n", fd,
+            errno, strerror(errno));
+        return NULL;
+    }
+
+    struct sockaddr_in addr;
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = inet_addr("172.17.255.255");
+    addr.sin_port = htons(8081);
+
+    while (1)
+    {
+        sleep(1);
+        UDP_packet packet = {};
+        udp_discovery_packet_create(&packet, 8080, "Test", 4);
+        char udp_buffer[50];
+        udp_discovery_packet_serialize(&packet, udp_buffer, 50);
+        sendto(fd, udp_buffer, 50, 0, (struct sockaddr*)&addr, sizeof(addr));
+    }
 }

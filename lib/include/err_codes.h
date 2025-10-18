@@ -17,6 +17,7 @@ typedef long long int err_t;
 #define DISFS_ERR_ALLOC (-2)
 #define DISFS_ERR_SOCK (-3)
 #define DISFS_ERR_EPOLL (-4)
+#define DISFS_ERR_INVALID_ARG (-5)
 
 #define DISFS_ERR_MAX_PEER (-10)
 #define DISFS_ERR_READED (-11)

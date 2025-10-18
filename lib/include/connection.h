@@ -27,10 +27,24 @@ typedef struct connection_t
     int32_t fd;
     client_t clients[MAX_NEIGHBOURS];
 
+    char local_ip[INET_ADDRSTRLEN];
+
     int32_t udp_fd;
     struct sockaddr_in udp_addr;
 } connection_t;
 
-err_t create_connection(connection_t connection[static 1], int32_t port);
+/**
+ * @brief optional params for connection create
+ */
+typedef struct
+{
+    int32_t port_tcp;
+    int32_t port_udp;
+} connection_params_opt;
+
+err_t _internal_create_connection(connection_t conn[static 1],
+                                  connection_params_opt params);
+#define create_connection(conn, ...)                                           \
+    _internal_create_connection(conn, (connection_params_opt){__VA_ARGS__})
 
 #endif
