@@ -18,6 +18,7 @@ typedef struct client_t
     socklen_t len;
     int32_t fd;
     int_fast8_t active;
+    char ip[INET_ADDRSTRLEN];
 } client_t;
 
 typedef struct connection_t
@@ -31,6 +32,13 @@ typedef struct connection_t
 
     int32_t udp_fd;
     struct sockaddr_in udp_addr;
+
+    pthread_t udp_th;
+    pthread_t tcp_th;
+
+    volatile int udp_th_run;
+    volatile int tcp_th_run;
+
 } connection_t;
 
 /**
@@ -44,6 +52,9 @@ typedef struct
 
 err_t _internal_create_connection(connection_t conn[static 1],
                                   connection_params_opt params);
+
+void close_connection(connection_t conn[static 1]);
+
 #define create_connection(conn, ...)                                           \
     _internal_create_connection(conn, (connection_params_opt){__VA_ARGS__})
 

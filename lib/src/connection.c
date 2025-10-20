@@ -30,7 +30,8 @@ static err_t connection_handle_events(int32_t epoll, struct epoll_event* events,
                                       int32_t events_count,
                                       connection_t connection[static 1]);
 static err_t connection_to_new_server(UDP_packet packet[static 1],
-                                      struct sockaddr_in* addr);
+                                      struct sockaddr_in* addr,
+                                      const char ip[INET_ADDRSTRLEN]);
 
 static void connection_get_local_ip(connection_t connection[static 1]);
 
@@ -138,10 +139,12 @@ err_t _internal_create_connection(connection_t connection[static 1],
 
     LOG_DEBUG("Successfully created connection socket: %d\n", connection->fd);
 
-    pthread_t th;
-    pthread_create(&th, NULL, connection_thread, connection);
-    pthread_t th_udp;
-    pthread_create(&th_udp, NULL, connection_udp_thread, connection);
+    connection->tcp_th_run = 1;
+    connection->udp_th_run = 1;
+
+    pthread_create(&connection->tcp_th, NULL, connection_thread, connection);
+    pthread_create(&connection->udp_th, NULL, connection_udp_thread,
+                   connection);
     return 0;
 }
 
@@ -154,7 +157,7 @@ static void* connection_thread(void* arg)
     connection_set_noblock(conn->fd);
     connection_add_event(epoll, conn->fd, EPOLLIN);
     connection_add_event(epoll, conn->udp_fd, EPOLLIN);
-    while (1)
+    while (conn->tcp_th_run)
     {
         int32_t no_events = epoll_wait(epoll, events, EPOLL_MAX_FD * 10, 1000);
         connection_handle_events(epoll, events, no_events, conn);
@@ -290,7 +293,7 @@ static err_t connection_handle_events(int32_t epoll, struct epoll_event* events,
                 LOG_TRACE("Internal sended message!, ignoring\n");
                 continue;
             }
-            connection_to_new_server(&packet, &src_addr);
+            connection_to_new_server(&packet, &src_addr, ip);
         }
         else
         {
@@ -316,11 +319,31 @@ static err_t connection_handle_events(int32_t epoll, struct epoll_event* events,
     return DISFS_SUCCESS;
 }
 
-static err_t connection_to_new_server(UDP_packet packet[static 1],
-                                      struct sockaddr_in* addr)
-{
+// TODO: remove global
+static client_t clients[3];
 
-    client_t* client = malloc(sizeof(client));
+static err_t connection_to_new_server(UDP_packet packet[static 1],
+                                      struct sockaddr_in* addr,
+                                      const char ip[INET_ADDRSTRLEN])
+{
+    /* check if connection from this IP is already satisfied */
+    client_t* client;
+    for (int32_t i = 0; i < 3; i++)
+    {
+        if (clients[i].active)
+        {
+            if (strcmp(clients[i].ip, ip) == 0)
+            {
+                LOG_DEBUG("Connected before this IP: %s\n", ip);
+                return DISFS_SUCCESS;
+            }
+        }
+        else
+        {
+            client = &clients[i];
+            break;
+        }
+    }
     client->fd = socket(AF_INET, SOCK_STREAM, 0);
     if (client->fd < 0)
     {
@@ -338,11 +361,14 @@ static err_t connection_to_new_server(UDP_packet packet[static 1],
         return DISFS_ERR_SOCK;
     }
     LOG_DEBUG("Connected to client!\n");
+    client->active = 1;
+    memcpy(client->ip, ip, INET_ADDRSTRLEN);
     return DISFS_SUCCESS;
 }
 
 static void* connection_udp_thread(void* arg)
 {
+    connection_t* conn = arg;
     int32_t fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (fd <= 0)
     {
@@ -363,18 +389,26 @@ static void* connection_udp_thread(void* arg)
         return NULL;
     }
 
-    struct sockaddr_in addr;
+    struct sockaddr_in addr = {};
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = inet_addr("172.17.255.255");
     addr.sin_port = htons(8081);
 
-    while (1)
+    while (conn->udp_th_run)
     {
         sleep(1);
         UDP_packet packet = {};
         udp_discovery_packet_create(&packet, 8080, "Test", 4);
-        char udp_buffer[50];
+        char udp_buffer[50] = {0};
         udp_discovery_packet_serialize(&packet, udp_buffer, 50);
         sendto(fd, udp_buffer, 50, 0, (struct sockaddr*)&addr, sizeof(addr));
     }
+}
+
+void close_connection(connection_t conn[static 1])
+{
+    conn->tcp_th_run = 0;
+    conn->udp_th_run = 0;
+    pthread_join(conn->tcp_th, NULL);
+    pthread_join(conn->udp_th, NULL);
 }
