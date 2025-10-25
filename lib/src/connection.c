@@ -20,6 +20,8 @@
 #include <unistd.h>
 #define EPOLL_MAX_FD 100
 
+static int32_t is_first_connection = 0;
+
 static void* connection_thread(void* arg);
 static void* connection_udp_thread(void* arg);
 static err_t connection_set_noblock(int32_t fd);
@@ -117,7 +119,7 @@ err_t _internal_create_connection(connection_t connection[static 1],
 
     connection->addr.sin_addr.s_addr = INADDR_ANY;
     connection->addr.sin_family = AF_INET;
-    connection->addr.sin_port = htons(tcp_port);
+    connection->addr.sin_port = htons((uint16_t)tcp_port);
     connection->addr_len = sizeof(connection->addr);
 
     ret = bind(connection->fd, (struct sockaddr*)&connection->addr,
@@ -212,11 +214,16 @@ static err_t connection_accept_client(int32_t epoll,
         return DISFS_ERR_SOCK;
     }
     LOG_TRACE("Accepted new client: fd=%d\n", client.fd);
+    if (is_first_connection == 0)
+    {
+        is_first_connection = 1;
+    }
+    client_t* clients = connection->clients;
     for (int32_t i = 0; i < MAX_NEIGHBOURS; i++)
     {
-        if (!connection->clients[i].active)
+        if (!clients[i].active)
         {
-            connection->clients[i] = client;
+            clients[i] = client;
             connection_add_event(epoll, client.fd, EPOLLIN);
             return DISFS_SUCCESS;
         }
@@ -232,7 +239,7 @@ static err_t connection_read(client_t client[static 1])
 {
     char buffer[1024] = {};
     ssize_t readed = read(client->fd, buffer, sizeof(buffer) - 1);
-    LOG_INFO("Readed from %d, size %d, buffer = %s\n", client->fd, readed,
+    LOG_INFO("Readed from %d, size %ld, buffer = %s\n", client->fd, readed,
              buffer);
     if (readed <= 0)
     {
@@ -266,8 +273,8 @@ static err_t connection_handle_events(int32_t epoll, struct epoll_event* events,
             struct sockaddr_in src_addr;
             socklen_t addrlen = sizeof(src_addr);
 
-            int n = recvfrom(fd, buffer, sizeof(buffer) - 1, 0,
-                             (struct sockaddr*)&src_addr, &addrlen);
+            ssize_t n = recvfrom(fd, buffer, sizeof(buffer) - 1, 0,
+                                 (struct sockaddr*)&src_addr, &addrlen);
             char ip[INET_ADDRSTRLEN] = {};
             inet_ntop(AF_INET, &(src_addr.sin_addr), ip, sizeof(ip));
             LOG_TRACE("Received udp packet: fd=%d, ip=%s, port=%d, buffor=%s\n",
@@ -320,15 +327,15 @@ static err_t connection_handle_events(int32_t epoll, struct epoll_event* events,
 }
 
 // TODO: remove global
-static client_t clients[3];
+static client_t clients[MAX_NEIGHBOURS];
 
 static err_t connection_to_new_server(UDP_packet packet[static 1],
                                       struct sockaddr_in* addr,
                                       const char ip[INET_ADDRSTRLEN])
 {
     /* check if connection from this IP is already satisfied */
-    client_t* client;
-    for (int32_t i = 0; i < 3; i++)
+    client_t* client = NULL;
+    for (int32_t i = 0; i < MAX_NEIGHBOURS; i++)
     {
         if (clients[i].active)
         {
@@ -351,7 +358,7 @@ static err_t connection_to_new_server(UDP_packet packet[static 1],
         return DISFS_ERR_SOCK;
     }
     client->addr.sin_family = AF_INET;
-    client->addr.sin_port = htons(packet->tcp_port);
+    client->addr.sin_port = htons((uint16_t)packet->tcp_port);
     client->addr.sin_addr = addr->sin_addr;
 
     if (connect(client->fd, (struct sockaddr*)&client->addr,
@@ -361,6 +368,11 @@ static err_t connection_to_new_server(UDP_packet packet[static 1],
         return DISFS_ERR_SOCK;
     }
     LOG_DEBUG("Connected to client!\n");
+
+    if (is_first_connection == 0)
+    {
+        is_first_connection = 1;
+    }
     client->active = 1;
     memcpy(client->ip, ip, INET_ADDRSTRLEN);
     return DISFS_SUCCESS;
@@ -396,13 +408,19 @@ static void* connection_udp_thread(void* arg)
 
     while (conn->udp_th_run)
     {
-        sleep(1);
+        if (is_first_connection)
+        {
+            sleep(20);
+        }
+        else
+            sleep(1);
         UDP_packet packet = {};
         udp_discovery_packet_create(&packet, 8080, "Test", 4);
         char udp_buffer[50] = {0};
         udp_discovery_packet_serialize(&packet, udp_buffer, 50);
         sendto(fd, udp_buffer, 50, 0, (struct sockaddr*)&addr, sizeof(addr));
     }
+    return NULL;
 }
 
 void close_connection(connection_t conn[static 1])

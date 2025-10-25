@@ -7,7 +7,6 @@
 #define DISFS_LOGGER_H_
 
 #include <stdio.h>
-
 #define RED "\x1B[31m"
 #define GREEN "\x1B[32m"
 #define PURPLE "\x1B[35m"

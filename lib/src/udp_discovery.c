@@ -30,7 +30,7 @@ err_t udp_discovery_packet_create(UDP_packet packet[static 1], int32_t tcp_port,
 }
 
 err_t udp_discovery_packet_serialize(UDP_packet packet[static 1], char* buffer,
-                                     uint32_t buffer_len)
+                                     int64_t buffer_len)
 {
     ASSERT(buffer_len >= LEN,
            "Invalid size of buffer for udp packet serialize\n");
@@ -40,7 +40,7 @@ err_t udp_discovery_packet_serialize(UDP_packet packet[static 1], char* buffer,
         return DISFS_ERR_INVALID_ARG;
     }
     memset(buffer, 0, LEN);
-    int32_t int_len = sizeof(int);
+    size_t int_len = sizeof(int);
     memcpy(buffer, &packet->tcp_port, int_len);
     buffer += int_len;
     memcpy(buffer, &packet->magic_number, int_len);
@@ -53,16 +53,16 @@ err_t udp_discovery_packet_serialize(UDP_packet packet[static 1], char* buffer,
     buffer += int_len;
     memcpy(buffer, &packet->hostname_len, int_len);
     buffer += int_len;
-    memcpy(buffer, &packet->hostname, packet->hostname_len);
+    memcpy(buffer, &packet->hostname, (size_t)packet->hostname_len);
     return DISFS_SUCCESS;
 }
 
 err_t udp_discovery_packet_deserialize(UDP_packet packet[static 1],
-                                       char* buffer, uint32_t buffer_len)
+                                       char* buffer, int64_t buffer_len)
 {
     ASSERT(buffer_len >= LEN,
            "Invalid size of buffer for udp packet serialize\n");
-    int32_t int_len = sizeof(int);
+    size_t int_len = sizeof(int);
     memcpy(&packet->tcp_port, buffer, int_len);
     buffer += int_len;
     memcpy(&packet->magic_number, buffer, int_len);
@@ -76,6 +76,6 @@ err_t udp_discovery_packet_deserialize(UDP_packet packet[static 1],
     memcpy(&packet->hostname_len, buffer, int_len);
     buffer += int_len;
     memset(packet->hostname, 0, UDP_DISCOVERY_HOSTNAME_MAX_LEN);
-    memcpy(packet->hostname, buffer, packet->hostname_len);
+    memcpy(packet->hostname, buffer, (size_t)packet->hostname_len);
     return DISFS_SUCCESS;
 }
