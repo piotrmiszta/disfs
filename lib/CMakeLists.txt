@@ -1,7 +1,8 @@
 set(LIB_SOURCE_PATH ${CMAKE_SOURCE_DIR}/lib/src)
 
 add_library(disfslib ${LIB_SOURCE_PATH}/connection.c
-                     ${LIB_SOURCE_PATH}/udp_discovery.c)
+  ${LIB_SOURCE_PATH}/udp_discovery.c
+  ${LIB_SOURCE_PATH}/file_menager.c)
 
 target_include_directories(disfslib PUBLIC include/)
 

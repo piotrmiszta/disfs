@@ -237,7 +237,7 @@ static err_t connection_accept_client(int32_t epoll,
 
 static err_t connection_read(client_t client[static 1])
 {
-    char buffer[1024] = {};
+    char buffer[1024] = {0};
     ssize_t readed = read(client->fd, buffer, sizeof(buffer) - 1);
     LOG_INFO("Readed from %d, size %ld, buffer = %s\n", client->fd, readed,
              buffer);
@@ -269,19 +269,19 @@ static err_t connection_handle_events(int32_t epoll, struct epoll_event* events,
                this packet, we should initiate connection with following client.
 
              */
-            char buffer[1024] = {};
+            char buffer[1024] = {0};
             struct sockaddr_in src_addr;
             socklen_t addrlen = sizeof(src_addr);
 
             ssize_t n = recvfrom(fd, buffer, sizeof(buffer) - 1, 0,
                                  (struct sockaddr*)&src_addr, &addrlen);
-            char ip[INET_ADDRSTRLEN] = {};
+            char ip[INET_ADDRSTRLEN] = {0};
             inet_ntop(AF_INET, &(src_addr.sin_addr), ip, sizeof(ip));
             LOG_TRACE("Received udp packet: fd=%d, ip=%s, port=%d, buffor=%s\n",
                       fd, ip, ntohs(src_addr.sin_port), buffer);
 
             /* resend udp packet, to inform where start connection */
-            UDP_packet packet = {};
+            UDP_packet packet = {0};
             udp_discovery_packet_deserialize(&packet, buffer, n);
             // after that try to connect to this server
             if (packet.magic_number != UDP_DISCOVERY_PACKET_MAGIC_NUMBER ||
@@ -401,7 +401,7 @@ static void* connection_udp_thread(void* arg)
         return NULL;
     }
 
-    struct sockaddr_in addr = {};
+    struct sockaddr_in addr = {0};
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = inet_addr("172.17.255.255");
     addr.sin_port = htons(8081);
@@ -414,7 +414,7 @@ static void* connection_udp_thread(void* arg)
         }
         else
             sleep(1);
-        UDP_packet packet = {};
+        UDP_packet packet = {0};
         udp_discovery_packet_create(&packet, 8080, "Test", 4);
         char udp_buffer[50] = {0};
         udp_discovery_packet_serialize(&packet, udp_buffer, 50);
