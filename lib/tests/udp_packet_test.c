@@ -26,10 +26,6 @@ static void udp_create_test(void** state)
     timespec_get(&after, TIME_UTC);
 
     assert_int_equal(packet.tcp_port, 8080);
-    printf("%d %d %d\n", before.tv_nsec, after.tv_nsec,
-           packet.timestamp.tv_nsec);
-    printf("%d %d %d\n", before.tv_sec, after.tv_sec, packet.timestamp.tv_sec);
-
     assert_in_range(packet.timestamp.tv_sec, before.tv_sec, after.tv_sec);
     if (packet.timestamp.tv_sec == after.tv_sec)
     {
