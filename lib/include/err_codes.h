@@ -21,6 +21,7 @@ typedef long long int err_t;
 
 #define DISFS_ERR_MAX_PEER (-10)
 #define DISFS_ERR_READED (-11)
+#define DISFS_ERR_FILE_GENERIC (-12)
 
 #define ASSERT(cond, msg) assert(cond || (_Bool)msg)
 
