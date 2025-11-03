@@ -19,17 +19,13 @@ static void udp_create_test(void** state)
 {
     struct timespec before;
     struct timespec after;
-    UDP_packet packet = {};
+    UDP_packet packet = {0};
     timespec_get(&before, TIME_UTC);
     assert_int_equal(udp_discovery_packet_create(&packet, 8080, "TEST", 4),
                      DISFS_SUCCESS);
     timespec_get(&after, TIME_UTC);
 
     assert_int_equal(packet.tcp_port, 8080);
-    printf("%d %d %d\n", before.tv_nsec, after.tv_nsec,
-           packet.timestamp.tv_nsec);
-    printf("%d %d %d\n", before.tv_sec, after.tv_sec, packet.timestamp.tv_sec);
-
     assert_in_range(packet.timestamp.tv_sec, before.tv_sec, after.tv_sec);
     if (packet.timestamp.tv_sec == after.tv_sec)
     {
@@ -59,12 +55,12 @@ static void udp_create_test(void** state)
 
 static void udp_serialize_deserialize_test(void** state)
 {
-    UDP_packet packet = {};
+    UDP_packet packet = {0};
     assert_int_equal(udp_discovery_packet_create(&packet, 8080, "TEST", 4),
                      DISFS_SUCCESS);
     char serialized[44];
     udp_discovery_packet_serialize(&packet, serialized, 44);
-    UDP_packet packet2 = {};
+    UDP_packet packet2 = {0};
     udp_discovery_packet_deserialize(&packet2, serialized, 44);
     assert_int_equal(packet2.tcp_port, packet.tcp_port);
     assert_int_equal(packet2.magic_number, packet.magic_number);
